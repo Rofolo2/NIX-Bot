@@ -205,11 +205,10 @@ async def sortear(interaction: discord.Interaction):
 @bot.event
 async def on_member_join(member):
     try:
-        # !!! COPIA Y PEGA AQUÍ LA ID NUMÉRICA DE TU CANAL GENERAL DE BIENVENIDAS !!!
-        ID_CANAL_BIENVENIDA = 1234567890123456789 
-
-        canal_bienvenida = bot.get_channel(ID_CANAL_BIENVENIDA)
+        # Buscamos el canal de bienvenidas directamente por su nombre exacto
+        canal_bienvenida = discord.utils.get(member.guild.text_channels, name="〔💬〕general")
         if not canal_bienvenida:
+            print("❌ [Bienvenida] No se encontró ningún canal llamado 〔💬〕general")
             return
 
         # Buscamos los canales de roles y reglas por sus nombres para mencionarlos dinámicamente
@@ -232,6 +231,7 @@ async def on_member_join(member):
 
     except Exception as e:
         print(f"❌ [Bienvenida] Error crítico en bienvenida: {e}")
+
 
 
 # ==================== ENCENDER EL BOT ====================
