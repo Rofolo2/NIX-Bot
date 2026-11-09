@@ -57,13 +57,37 @@ async def on_ready():
 # ==================== MANEJADOR DE COMANDOS DE BARRA (/) ====================
 
 # --- COMANDO: DECIR ---
-@bot.tree.command(name="decir", description="Hace que el bot diga un mensaje")
-@app_commands.describe(mensaje="Mensaje que enviará el bot")
-async def decir(interaction: discord.Interaction, mensaje: str):
-    # Respondemos de forma oculta (ephemeral) para que Discord no dé error de interacción
-    await interaction.response.send_message("✅ Mensaje enviado con éxito.", ephemeral=True)
-    # Enviamos el mensaje real al canal de texto
-    await interaction.channel.send(mensaje)
+@bot.tree.command(name="decir", description="Hace que el bot diga un mensaje y/o envíe una imagen")
+@app_commands.describe(
+    mensaje="Mensaje que enviará el bot (opcional si envías imagen)",
+    imagen="Imagen o archivo que enviará el bot (opcional)"
+)
+async def decir(
+    interaction: discord.Interaction, 
+    mensaje: str = None, 
+    imagen: discord.Attachment = None
+):
+    # Verificamos que al menos haya enviado un texto o una imagen
+    if not mensaje and not imagen:
+        await interaction.response.send_message("❌ Debes escribir un mensaje o subir una imagen.", ephemeral=True)
+        return
+
+    # Deferimos de forma oculta por si la imagen tarda unos segundos en subirse
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        # Si se adjuntó una imagen, la convertimos a un archivo válido para Discord
+        archivo = await imagen.to_file() if imagen else None
+        
+        # Enviamos el mensaje y/o la imagen al canal
+        await interaction.channel.send(content=mensaje, file=archivo)
+        
+        # Confirmamos al usuario que todo salió bien
+        await interaction.followup.send("✅ Mensaje enviado con éxito.", ephemeral=True)
+    except Exception as e:
+        print(f"Error en comando decir: {e}")
+        await interaction.followup.send("❌ Hubo un error al enviar el mensaje o la imagen.", ephemeral=True)
+)
 
 
 # --- COMANDO: CREAR SORTEO ---
