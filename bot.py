@@ -82,12 +82,11 @@ async def decir(
         # Enviamos el mensaje y/o la imagen al canal
         await interaction.channel.send(content=mensaje, file=archivo)
         
-        # Confirmamos al usuario que todo salió bien
+                # Confirmamos al usuario que todo salió bien
         await interaction.followup.send("✅ Mensaje enviado con éxito.", ephemeral=True)
     except Exception as e:
         print(f"Error en comando decir: {e}")
         await interaction.followup.send("❌ Hubo un error al enviar el mensaje o la imagen.", ephemeral=True)
-)
 
 
 # --- COMANDO: CREAR SORTEO ---
