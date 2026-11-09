@@ -56,37 +56,72 @@ async def on_ready():
 
 # ==================== MANEJADOR DE COMANDOS DE BARRA (/) ====================
 
+# --- VENTANA EMERGENTE (MODAL) PARA AGREGAR TEXTO OPCIONAL ---
+class ModalTextoImagen(discord.ui.Modal, title="Agregar texto a la imagen"):
+    nuevo_texto = discord.ui.TextInput(
+        label="Escribe el mensaje o descripción",
+        style=discord.TextStyle.paragraph,
+        placeholder="Escribe aquí lo que quieres que diga el bot arriba de la imagen...",
+        required=True,
+        max_length=2000
+    )
+
+    def __init__(self, mensaje_bot: discord.Message):
+        super().__init__()
+        self.mensaje_bot = mensaje_bot
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await self.mensaje_bot.edit(content=self.nuevo_texto.value)
+        await interaction.response.send_message("✅ ¡Texto agregado correctamente!", ephemeral=True)
+
+
+# --- BOTÓN OPCIONAL PARA ABRIR LA VENTANA ---
+class VistaAgregarTexto(discord.ui.View):
+    def __init__(self, mensaje_bot: discord.Message):
+        super().__init__(timeout=120) # El botón dura 2 minutos activo
+        self.mensaje_bot = mensaje_bot
+
+    @discord.ui.button(label="📝 Agregar texto", style=discord.ButtonStyle.primary)
+    async def boton_texto(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ModalTextoImagen(self.mensaje_bot))
+
+
 # --- COMANDO: DECIR ---
-@bot.tree.command(name="decir", description="Hace que el bot diga un mensaje y/o envíe una imagen")
+@bot.tree.command(name="decir", description="Hace que el bot envíe un mensaje y/o una imagen")
 @app_commands.describe(
-    mensaje="Mensaje que enviará el bot (opcional si envías imagen)",
-    imagen="Imagen o archivo que enviará el bot (opcional)"
+    mensaje="Mensaje opcional que enviará el bot",
+    imagen="Imagen o archivo opcional que enviará el bot"
 )
 async def decir(
     interaction: discord.Interaction, 
     mensaje: str = None, 
     imagen: discord.Attachment = None
 ):
-    # Verificamos que al menos haya enviado un texto o una imagen
     if not mensaje and not imagen:
         await interaction.response.send_message("❌ Debes escribir un mensaje o subir una imagen.", ephemeral=True)
         return
 
-    # Deferimos de forma oculta por si la imagen tarda unos segundos en subirse
     await interaction.response.defer(ephemeral=True)
 
     try:
-        # Si se adjuntó una imagen, la convertimos a un archivo válido para Discord
         archivo = await imagen.to_file() if imagen else None
-        
-        # Enviamos el mensaje y/o la imagen al canal
-        await interaction.channel.send(content=mensaje, file=archivo)
-        
-                # Confirmamos al usuario que todo salió bien
-        await interaction.followup.send("✅ Mensaje enviado con éxito.", ephemeral=True)
+        mensaje_enviado = await interaction.channel.send(content=mensaje, file=archivo)
+
+        # Si subiste una imagen sin texto, te da el botón opcional por si quieres añadírselo
+        if imagen and not mensaje:
+            vista = VistaAgregarTexto(mensaje_enviado)
+            await interaction.followup.send(
+                "✅ Imagen enviada. Si quieres ponerle un texto arriba, presiona el botón:", 
+                view=vista, 
+                ephemeral=True
+            )
+        else:
+            await interaction.followup.send("✅ Mensaje enviado con éxito.", ephemeral=True)
+
     except Exception as e:
         print(f"Error en comando decir: {e}")
         await interaction.followup.send("❌ Hubo un error al enviar el mensaje o la imagen.", ephemeral=True)
+
 
 
 # --- COMANDO: CREAR SORTEO ---
