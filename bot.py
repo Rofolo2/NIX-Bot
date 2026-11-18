@@ -56,34 +56,74 @@ async def on_ready():
 
 # ==================== MANEJADOR DE COMANDOS DE BARRA (/) ====================
 
-# --- COMANDO: DECIR ---
-@bot.tree.command(name="decir", description="Envía un mensaje y/o una imagen al instante")
+# --- COMANDO: DECIR (AHORA CON SOPORTE PARA IMÁGENES Y VIDEOS) ---
+@bot.tree.command(name="decir", description="Envía un mensaje, imagen o video al instante")
 @app_commands.describe(
     mensaje="Escribe aquí el texto (opcional)",
-    imagen="Sube aquí la imagen (opcional)"
+    archivo="Sube aquí una imagen o video (opcional)"
 )
 async def decir(
     interaction: discord.Interaction, 
     mensaje: str = None, 
-    imagen: discord.Attachment = None
+    archivo: discord.Attachment = None
 ):
-    if not mensaje and not imagen:
-        await interaction.response.send_message("❌ Debes escribir un mensaje o subir una imagen.", ephemeral=True)
+    if not mensaje and not archivo:
+        await interaction.response.send_message("❌ Debes escribir un mensaje o subir una imagen/video.", ephemeral=True)
         return
 
     await interaction.response.defer(ephemeral=True)
     
     try:
-        archivo = await imagen.to_file() if imagen else None
-        await interaction.channel.send(content=mensaje, file=archivo)
-        await interaction.followup.send("✅ Mensaje enviado con éxito.", ephemeral=True)
+        # Convertimos el adjunto (imagen o video) a un archivo listo para enviar
+        archivo_enviar = await archivo.to_file() if archivo else None
+        await interaction.channel.send(content=mensaje, file=archivo_enviar)
+        await interaction.followup.send("✅ Contenido enviado con éxito.", ephemeral=True)
     except Exception as e:
         print(f"Error en comando decir: {e}")
-        await interaction.followup.send("❌ Hubo un error al enviar el mensaje o la imagen.", ephemeral=True)
+        await interaction.followup.send("❌ Hubo un error al enviar el mensaje o el archivo (revisa que el video no sea muy pesado).", ephemeral=True)
 
 
+# --- COMANDO: 8BALL (BOLA 8 MÁGICA) ---
+@bot.tree.command(name="8ball", description="Hazle una pregunta a la bola 8 mágica")
+@app_commands.describe(
+    pregunta="Escribe la pregunta que quieres hacerle a la bola mágica"
+)
+async def eight_ball(interaction: discord.Interaction, pregunta: str):
+    respuestas = [
+        # Positivas
+        "Sí, definitivamente. 🟢",
+        "Es totalmente seguro. 🟢",
+        "Sin ninguna duda. 🟢",
+        "Todo apunta a que sí. 🟢",
+        "Puedes contar con ello. 🟢",
+        "Claro que sí. 🟢",
+        "Por supuesto. 🟢",
+        # Dudosas / Neutrales
+        "Respuesta confusa, vuelve a intentarlo. 🟡",
+        "Pregunta de nuevo más tarde. 🟡",
+        "Mejor no te lo digo ahora. 🟡",
+        "No puedo predecirlo en este momento. 🟡",
+        "Concéntrate y pregunta otra vez. 🟡",
+        # Negativas
+        "No cuentes con ello. 🔴",
+        "Mi respuesta es no. 🔴",
+        "Mis fuentes dicen que no. 🔴",
+        "Las perspectivas no son muy buenas. 🔴",
+        "Muy dudoso. 🔴",
+        "Definitivamente no. 🔴"
+    ]
 
+    respuesta_elegida = random.choice(respuestas)
 
+    embed = discord.Embed(
+        title="🎱 La Bola 8 Mágica dice...",
+        color=discord.Color.purple()
+    )
+    embed.add_field(name="❓ Pregunta", value=pregunta, inline=False)
+    embed.add_field(name="🔮 Respuesta", value=f"**{respuesta_elegida}**", inline=False)
+    embed.set_footer(text=f"Preguntado por {interaction.user.name}")
+
+    await interaction.response.send_message(embed=embed)
 # --- COMANDO: CREAR SORTEO ---
 @bot.tree.command(name="crear-sorteo", description="Inicia un sorteo")
 @app_commands.describe(
@@ -251,9 +291,6 @@ async def on_member_join(member):
         print(f"❌ [Bienvenida] Error crítico en bienvenida: {e}")
 
 
-
 # ==================== ENCENDER EL BOT ====================
 TOKEN = os.environ.get("DISCORD_TOKEN")
 bot.run(TOKEN)
-
-
