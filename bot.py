@@ -134,7 +134,8 @@ async def on_message(message):
 
                 # 2. Intentamos con GROQ (ultra rápido y estable)
                 if cliente_groq:
-                    for modelo_groq in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]:
+                    for modelo_groq in ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"]:
+
                         try:
                             respuesta_groq = await asyncio.wait_for(
                                 asyncio.to_thread(
