@@ -8,6 +8,7 @@ from discord.ext import commands
 from discord import app_commands
 from google import genai
 from google.genai import types
+from groq import Groq
 from mem0 import MemoryClient
 
 # ==================== TRUCO PARA RENDER GRATIS (FLASK) ====================
@@ -31,9 +32,11 @@ mantener_vivo()
 
 
 # ==================== CONFIGURACIÓN DE IA Y MEMORIA ====================
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 MEM0_API_KEY = os.environ.get("MEM0_API_KEY")
 
+cliente_groq = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 cliente_gemini = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 cliente_memoria = MemoryClient(api_key=MEM0_API_KEY) if MEM0_API_KEY else None
 
@@ -82,8 +85,8 @@ async def on_message(message):
         if not texto_limpio:
             texto_limpio = "Hola, ¿qué tal?"
 
-        if not cliente_gemini or not cliente_memoria:
-            await message.reply("❌ Faltan configurar las claves GEMINI_API_KEY o MEM0_API_KEY en Render.")
+        if (not cliente_groq and not cliente_gemini) or not cliente_memoria:
+            await message.reply("❌ Faltan configurar las claves de IA o MEM0_API_KEY en Render.")
             return
 
         async with message.channel.typing():
@@ -91,7 +94,7 @@ async def on_message(message):
                 usuario_id = str(message.author.id)
                 nombre_usuario = message.author.display_name
 
-                # 1. Buscamos en Mem0 los recuerdos de este usuario (con límite de 5s)
+                # 1. Buscamos en Mem0 los recuerdos de este usuario
                 try:
                     resultados_memoria = await asyncio.wait_for(
                         asyncio.to_thread(
@@ -126,35 +129,46 @@ async def on_message(message):
                     f"- Mantén tus respuestas por debajo de los 1900 caracteres."
                 )
 
-                                # 2. Generamos la respuesta con Gemini (usando gemini-3.8-flash con 2 intentos rápidos)
-                respuesta_gemini = None
-                ultimo_error = None
+                texto_respuesta = None
 
-                for intento in range(2):
+                # 2. Intentamos primero con GROQ (ultra rápido y estable)
+                if cliente_groq:
                     try:
-                        respuesta_gemini = await asyncio.wait_for(
+                        respuesta_groq = await asyncio.wait_for(
                             asyncio.to_thread(
-                                cliente_gemini.models.generate_content,
-                                model="gemini-3.8-flash",
-                                contents=texto_limpio,
-                                config=types.GenerateContentConfig(
-                                    system_instruction=instrucciones_sistema,
-                                    temperature=0.75
-                                )
+                                cliente_groq.chat.completions.create,
+                                model="llama-3.3-70b-versatile",
+                                messages=[
+                                    {"role": "system", "content": instrucciones_sistema},
+                                    {"role": "user", "content": texto_limpio}
+                                ],
+                                temperature=0.75,
+                                max_tokens=1024
                             ),
-                            timeout=12.0
+                            timeout=10.0
                         )
-                        break
-                    except Exception as err_modelo:
-                        ultimo_error = err_modelo
-                        await asyncio.sleep(1.5)
+                        texto_respuesta = respuesta_groq.choices[0].message.content
+                    except Exception as err_groq:
+                        print(f"Groq falló, pasando a respaldo: {err_groq}", flush=True)
 
+                # 3. Si Groq fallara por algún motivo, usamos Gemini como respaldo
+                if not texto_respuesta and cliente_gemini:
+                    respuesta_gemini = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            cliente_gemini.models.generate_content,
+                            model="gemini-3.8-flash",
+                            contents=texto_limpio,
+                            config=types.GenerateContentConfig(
+                                system_instruction=instrucciones_sistema,
+                                temperature=0.75
+                            )
+                        ),
+                        timeout=12.0
+                    )
+                    texto_respuesta = respuesta_gemini.text
 
-                if not respuesta_gemini:
-                    raise ultimo_error if ultimo_error else Exception("Servidores de IA ocupados, intenta en unos segundos.")
-
-                # 3. Sacamos el texto de la respuesta (esta es la línea que faltaba)
-                texto_respuesta = respuesta_gemini.text or "Me quedé en blanco un segundo, dime otra vez."
+                if not texto_respuesta:
+                    texto_respuesta = "Me quedé en blanco un segundo, dime otra vez."
 
                 if len(texto_respuesta) > 1950:
                     texto_respuesta = texto_respuesta[:1950] + "..."
@@ -180,6 +194,7 @@ async def on_message(message):
                 await message.reply(f"❌ Fallo técnico: `{str(e)[:200]}`")
 
     await bot.process_commands(message)
+
 
 
 # ==================== MANEJADOR DE COMANDOS DE BARRA (/) ====================

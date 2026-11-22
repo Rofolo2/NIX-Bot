@@ -2,4 +2,4 @@ discord.py
 flask
 google-genai
 mem0ai
-
+groq
