@@ -6,9 +6,11 @@ from threading import Thread
 import discord
 from discord.ext import commands
 from discord import app_commands
+from google import genai
+from google.genai import types
+from mem0 import MemoryClient
 
 # ==================== TRUCO PARA RENDER GRATIS (FLASK) ====================
-# Creamos un servidor web idéntico a Express para engañar a Render y abrir el puerto 10000
 app = Flask('')
 
 @app.route('/')
@@ -16,12 +18,10 @@ def home():
     return "Bot Online y Servidor Activo en Python"
 
 def run_web_server():
-    # Render asigna automáticamente un puerto en la variable PORT, si no usa el 3000
     puerto = int(os.environ.get("PORT", 3000))
     print(f"[Flask] Puerto detectado con éxito: {puerto}")
     app.run(host='0.0.0.0', port=puerto)
 
-# Iniciamos el servidor web en un hilo secundario para que no congele al bot de Discord
 def mantener_vivo():
     t = Thread(target=run_web_server)
     t.start()
@@ -30,30 +30,129 @@ mantener_vivo()
 # ==========================================================================
 
 
+# ==================== CONFIGURACIÓN DE IA Y MEMORIA ====================
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+MEM0_API_KEY = os.environ.get("MEM0_API_KEY")
+
+cliente_gemini = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+cliente_memoria = MemoryClient(api_key=MEM0_API_KEY) if MEM0_API_KEY else None
+
+
 # ==================== CONFIGURACIÓN DE DISCORD ====================
-# Activamos los Intents Privilegiados obligatorios para leer miembros y reacciones
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.reactions = True
 
-# Inicializamos el cliente del Bot
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Variable global en memoria para almacenar el sorteo activo
 sorteo_activo = None
 
 @bot.event
 async def on_ready():
     print(f"🚀 ¡Bot conectado correctamente como {bot.user}!")
     try:
-        # Sincroniza los comandos de barra (/) con la API de Discord al encender
         sincronizados = await bot.tree.sync()
         print(f"✅ [Comandos] ¡Comandos globales ({len(sincronizados)}) cargados exitosamente!")
     except Exception as e:
         print(f"❌ [Comandos] Error al registrar los comandos: {e}")
 
 
+# ==================== IA CON MENCIONES (@NombaX) Y RESPUESTAS ====================
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    fue_mencionado = bot.user in message.mentions
+    es_respuesta_al_bot = (
+        message.reference is not None
+        and isinstance(message.reference.resolved, discord.Message)
+        and message.reference.resolved.author.id == bot.user.id
+    )
+
+    if fue_mencionado or es_respuesta_al_bot:
+        texto_limpio = (
+            message.content
+            .replace(f"<@{bot.user.id}>", "")
+            .replace(f"<@!{bot.user.id}>", "")
+            .strip()
+        )
+
+        if not texto_limpio:
+            texto_limpio = "Hola, ¿qué tal?"
+
+        if not cliente_gemini or not cliente_memoria:
+            await message.reply("❌ Faltan configurar las claves GEMINI_API_KEY o MEM0_API_KEY en Render.")
+            return
+
+        async with message.channel.typing():
+            try:
+                usuario_id = str(message.author.id)
+                nombre_usuario = message.author.display_name
+
+                resultados_memoria = await asyncio.to_thread(
+                    cliente_memoria.search,
+                    query=texto_limpio,
+                    user_id=usuario_id
+                )
+
+                lista_recuerdos = []
+                if isinstance(resultados_memoria, dict) and "results" in resultados_memoria:
+                    lista_recuerdos = [r.get("memory", "") for r in resultados_memoria["results"] if r.get("memory")]
+                elif isinstance(resultados_memoria, list):
+                    lista_recuerdos = [r.get("memory", "") for r in resultados_memoria if isinstance(r, dict) and r.get("memory")]
+
+                contexto_recuerdos = (
+                    "\n".join(f"- {recuerdo}" for recuerdo in lista_recuerdos)
+                    if lista_recuerdos
+                    else "Aún no tienes recuerdos previos con este usuario."
+                )
+
+                instrucciones_sistema = (
+                    f"Eres NombaX, un bot de Discord cercano, natural y con buen sentido del humor. "
+                    f"Estás conversando con {nombre_usuario}. "
+                    f"Aprende y adapta tu forma de hablar al estilo de este usuario (jerga, tono, humor) y toma en cuenta lo que sabes de él/ella:\n"
+                    f"{contexto_recuerdos}\n\n"
+                    f"Reglas importantes:\n"
+                    f"- Responde como en una charla real de Discord, directo y sin sonar robótico.\n"
+                    f"- Mantén tus respuestas por debajo de los 1900 caracteres para que quepan en un solo mensaje normal de Discord."
+                )
+
+                respuesta_gemini = await asyncio.to_thread(
+                    cliente_gemini.models.generate_content,
+                    model="gemini-2.5-flash",
+                    contents=texto_limpio,
+                    config=types.GenerateContentConfig(
+                        system_instruction=instrucciones_sistema,
+                        temperature=0.75
+                    )
+                )
+
+                texto_respuesta = respuesta_gemini.text or "Me quedé en blanco un segundo, dime otra vez."
+
+                if len(texto_respuesta) > 1950:
+                    texto_respuesta = texto_respuesta[:1950] + "..."
+
+                await message.reply(texto_respuesta, mention_author=False)
+
+                conversacion = [
+                    {"role": "user", "content": texto_limpio},
+                    {"role": "assistant", "content": texto_respuesta}
+                ]
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        cliente_memoria.add,
+                        messages=conversacion,
+                        user_id=usuario_id
+                    )
+                )
+
+            except Exception as e:
+                print(f"Error en IA por mención: {e}")
+                await message.reply("❌ Tuve un pequeño fallo al pensar la respuesta, intenta de nuevo en un ratito.")
+
+    await bot.process_commands(message)
 # ==================== MANEJADOR DE COMANDOS DE BARRA (/) ====================
 
 # --- COMANDO: DECIR (AHORA CON SOPORTE PARA IMÁGENES Y VIDEOS) ---
@@ -74,7 +173,6 @@ async def decir(
     await interaction.response.defer(ephemeral=True)
     
     try:
-        # Convertimos el adjunto (imagen o video) a un archivo listo para enviar
         archivo_enviar = await archivo.to_file() if archivo else None
         await interaction.channel.send(content=mensaje, file=archivo_enviar)
         await interaction.followup.send("✅ Contenido enviado con éxito.", ephemeral=True)
@@ -90,7 +188,6 @@ async def decir(
 )
 async def eight_ball(interaction: discord.Interaction, pregunta: str):
     respuestas = [
-        # Positivas
         "Sí, definitivamente. 🟢",
         "Es totalmente seguro. 🟢",
         "Sin ninguna duda. 🟢",
@@ -98,13 +195,11 @@ async def eight_ball(interaction: discord.Interaction, pregunta: str):
         "Puedes contar con ello. 🟢",
         "Claro que sí. 🟢",
         "Por supuesto. 🟢",
-        # Dudosas / Neutrales
         "Respuesta confusa, vuelve a intentarlo. 🟡",
         "Pregunta de nuevo más tarde. 🟡",
         "Mejor no te lo digo ahora. 🟡",
         "No puedo predecirlo en este momento. 🟡",
         "Concéntrate y pregunta otra vez. 🟡",
-        # Negativas
         "No cuentes con ello. 🔴",
         "Mi respuesta es no. 🔴",
         "Mis fuentes dicen que no. 🔴",
@@ -124,6 +219,8 @@ async def eight_ball(interaction: discord.Interaction, pregunta: str):
     embed.set_footer(text=f"Preguntado por {interaction.user.name}")
 
     await interaction.response.send_message(embed=embed)
+
+
 # --- COMANDO: CREAR SORTEO ---
 @bot.tree.command(name="crear-sorteo", description="Inicia un sorteo")
 @app_commands.describe(
@@ -141,16 +238,14 @@ async def crear_sorteo(
 ):
     global sorteo_activo
 
-    # Verificamos si el usuario es administrador
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("❌ No tienes permisos para usar este comando.", ephemeral=True)
         return
 
-    # Creamos el diseño del cuadro (Embed) azul
     embed = discord.Embed(
         title="🎁 ¡NUEVO SORTEO ACTIVO! 🎁",
         description=f"{mensaje}\n\nPara entrar, simplemente presiona el botón de **🎉** aquí abajo.",
-        color=discord.Color.from_rgb(30, 144, 255) # Azul Dodger
+        color=discord.Color.from_rgb(30, 144, 255)
     )
     embed.add_field(name="🏆 Premio", value=f"**{objeto}**", inline=True)
     embed.add_field(name="👥 Ganadores", value=f"**{ganadores}**", inline=True)
@@ -161,11 +256,9 @@ async def crear_sorteo(
 
     await interaction.response.send_message("📦 Generando sorteo...", ephemeral=True)
     
-    # Enviamos el embed al canal y le añadimos la reacción 🎉
     mensaje_sorteo = await interaction.channel.send(embed=embed)
     await mensaje_sorteo.add_reaction("🎉")
 
-    # Guardamos los datos del sorteo en la memoria global
     sorteo_activo = {
         "premio": objeto,
         "ganadores_requeridos": ganadores,
@@ -187,21 +280,18 @@ async def sortear(interaction: discord.Interaction):
         await interaction.response.send_message("❌ No hay ningún sorteo activo en este momento.", ephemeral=True)
         return
 
-    # Deferimos la respuesta para indicarle a Discord que procesaremos datos pesados
     await interaction.response.defer()
 
     try:
-        # Buscamos el canal y el mensaje original del sorteo
         canal = bot.get_channel(sorteo_activo["canal_id"])
         mensaje_original = await canal.fetch_message(sorteo_activo["mensaje_id"])
         
-        # Obtenemos los usuarios que reaccionaron con 🎉
         reaccion = discord.utils.get(mensaje_original.reactions, emoji="🎉")
         participantes = []
         
         if reaccion:
             async for usuario in reaccion.users():
-                if not usuario.bot: # Filtramos para que no entren bots al sorteo
+                if not usuario.bot:
                     participantes.append(usuario)
 
         if not participantes:
@@ -210,21 +300,16 @@ async def sortear(interaction: discord.Interaction):
 
         await interaction.followup.send("📦 **|** _Barajando la lista de participantes y seleccionando boletos de forma segura..._")
         
-        # Esperamos 2.5 segundos para simular suspenso
         await asyncio.sleep(2.5)
 
         num_ganadores = sorteo_activo["ganadores_requeridos"]
-        # Evitamos que pida más ganadores de la cantidad total de participantes reales
         total_ganadores_reales = min(num_ganadores, len(participantes))
 
-        # Seleccionamos ganadores al azar sin repetir
         ganadores_elegidos = random.sample(participantes, total_ganadores_reales)
 
-        # Construimos el texto de mención en lista
         texto_menciones = "\n".join([f"{i+1}. {g.mention} (**{g.name}**)" for i, g in enumerate(ganadores_elegidos)])
         menciones_simples = " ".join([g.mention for g in ganadores_elegidos])
 
-        # Diseñamos el embed de resultados (Verde)
         embed_ganador = discord.Embed(
             title="🎉 ¡RESULTADOS DEL SORTEO! 🎉" if total_ganadores_reales > 1 else "🎉 ¡TENEMOS UN GANADOR! 🎉",
             description=f"El sorteo ha concluido exitosamente entre los **{len(participantes)}** participantes del servidor.",
@@ -241,17 +326,14 @@ async def sortear(interaction: discord.Interaction):
         if sorteo_activo["imagen_url"]:
             embed_ganador.set_thumbnail(url=sorteo_activo["imagen_url"])
 
-        # Enviamos los resultados al canal del sorteo
         await interaction.channel.send(content=f"¡Sorteo finalizado! 🏆 {menciones_simples}", embed=embed_ganador)
 
-        # Anuncio automático en el canal 〔👑〕news
         canal_news = discord.utils.get(interaction.guild.text_channels, name="〔👑〕news")
         if canal_news:
             await canal_news.send(
                 content=f"📢 **¡Atención Comunidad!** Felicidades a {menciones_simples} por haber ganado el sorteo de **{sorteo_activo['premio']}** 👑🎉"
             )
 
-        # Reseteamos la variable del sorteo para permitir uno nuevo
         sorteo_activo = None
 
     except Exception as e:
@@ -263,17 +345,14 @@ async def sortear(interaction: discord.Interaction):
 @bot.event
 async def on_member_join(member):
     try:
-        # Buscamos el canal de bienvenidas directamente por su nombre exacto
         canal_bienvenida = discord.utils.get(member.guild.text_channels, name="〔💬〕general")
         if not canal_bienvenida:
             print("❌ [Bienvenida] No se encontró ningún canal llamado 〔💬〕general")
             return
 
-        # Buscamos los canales de roles y reglas por sus nombres para mencionarlos dinámicamente
         canal_roles = discord.utils.get(member.guild.text_channels, name="roles")
         canal_reglas = discord.utils.get(member.guild.text_channels, name="reglas")
 
-        # Si el canal existe sacamos su etiqueta interactiva <#ID>, si no, dejamos el texto plano #nombre
         mencion_roles = canal_roles.mention if canal_roles else "#roles"
         mencion_reglas = canal_reglas.mention if canal_reglas else "#reglas"
 
