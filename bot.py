@@ -131,7 +131,7 @@ async def on_message(message):
                 # 2. Generamos la respuesta con Gemini
                 respuesta_gemini = await asyncio.to_thread(
                     cliente_gemini.models.generate_content,
-                    model="gemini-2.5-flash",
+                    model="gemini-3.8-flash",
                     contents=texto_limpio,
                     config=types.GenerateContentConfig(
                         system_instruction=instrucciones_sistema,
