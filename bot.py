@@ -91,11 +91,20 @@ async def on_message(message):
                 usuario_id = str(message.author.id)
                 nombre_usuario = message.author.display_name
 
-                resultados_memoria = await asyncio.to_thread(
-                    cliente_memoria.search,
-                    query=texto_limpio,
-                    user_id=usuario_id
-                )
+                # 1. Buscamos en Mem0 usando el nuevo formato con filters
+                try:
+                    resultados_memoria = await asyncio.to_thread(
+                        cliente_memoria.search,
+                        query=texto_limpio,
+                        filters={"user_id": usuario_id}
+                    )
+                except TypeError:
+                    # Respaldo por si la versión instalada usa user_id directo
+                    resultados_memoria = await asyncio.to_thread(
+                        cliente_memoria.search,
+                        query=texto_limpio,
+                        user_id=usuario_id
+                    )
 
                 lista_recuerdos = []
                 if isinstance(resultados_memoria, dict) and "results" in resultados_memoria:
@@ -119,6 +128,7 @@ async def on_message(message):
                     f"- Mantén tus respuestas por debajo de los 1900 caracteres para que quepan en un solo mensaje normal de Discord."
                 )
 
+                # 2. Generamos la respuesta con Gemini
                 respuesta_gemini = await asyncio.to_thread(
                     cliente_gemini.models.generate_content,
                     model="gemini-2.5-flash",
@@ -136,6 +146,7 @@ async def on_message(message):
 
                 await message.reply(texto_respuesta, mention_author=False)
 
+                # 3. Guardamos la conversación en Mem0 en segundo plano
                 conversacion = [
                     {"role": "user", "content": texto_limpio},
                     {"role": "assistant", "content": texto_respuesta}
@@ -149,10 +160,11 @@ async def on_message(message):
                 )
 
             except Exception as e:
-                print(f"Error en IA por mención: {e}")
-                await message.reply("❌ Tuve un pequeño fallo al pensar la respuesta, intenta de nuevo en un ratito.")
+                print(f"Error en IA por mención: {e}", flush=True)
+                await message.reply(f"❌ Fallo técnico: `{str(e)[:200]}`")
 
     await bot.process_commands(message)
+
 # ==================== MANEJADOR DE COMANDOS DE BARRA (/) ====================
 
 # --- COMANDO: DECIR (AHORA CON SOPORTE PARA IMÁGENES Y VIDEOS) ---
