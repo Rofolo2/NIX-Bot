@@ -126,29 +126,29 @@ async def on_message(message):
                     f"- Mantén tus respuestas por debajo de los 1900 caracteres."
                 )
 
-                # 2. Generamos la respuesta con Gemini (máximo 8s por modelo)
-                modelos_disponibles = ["gemini-3.8-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
+                                # 2. Generamos la respuesta con Gemini (usando gemini-3.8-flash con 2 intentos rápidos)
                 respuesta_gemini = None
                 ultimo_error = None
 
-                for modelo_actual in modelos_disponibles:
+                for intento in range(2):
                     try:
                         respuesta_gemini = await asyncio.wait_for(
                             asyncio.to_thread(
                                 cliente_gemini.models.generate_content,
-                                model=modelo_actual,
+                                model="gemini-3.8-flash",
                                 contents=texto_limpio,
                                 config=types.GenerateContentConfig(
                                     system_instruction=instrucciones_sistema,
                                     temperature=0.75
                                 )
                             ),
-                            timeout=8.0
+                            timeout=12.0
                         )
                         break
                     except Exception as err_modelo:
                         ultimo_error = err_modelo
-                        continue
+                        await asyncio.sleep(1.5)
+
 
                 if not respuesta_gemini:
                     raise ultimo_error if ultimo_error else Exception("Servidores de IA ocupados, intenta en unos segundos.")
