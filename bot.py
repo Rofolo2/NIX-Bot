@@ -130,26 +130,30 @@ async def on_message(message):
                 )
 
                 texto_respuesta = None
+                error_groq_detalle = "No configurado"
 
-                # 2. Intentamos primero con GROQ (ultra rápido y estable)
+                # 2. Intentamos con GROQ (ultra rápido y estable)
                 if cliente_groq:
-                    try:
-                        respuesta_groq = await asyncio.wait_for(
-                            asyncio.to_thread(
-                                cliente_groq.chat.completions.create,
-                                model="llama-3.3-70b-versatile",
-                                messages=[
-                                    {"role": "system", "content": instrucciones_sistema},
-                                    {"role": "user", "content": texto_limpio}
-                                ],
-                                temperature=0.75,
-                                max_tokens=1024
-                            ),
-                            timeout=10.0
-                        )
-                        texto_respuesta = respuesta_groq.choices[0].message.content
-                    except Exception as err_groq:
-                        print(f"Groq falló, pasando a respaldo: {err_groq}", flush=True)
+                    for modelo_groq in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]:
+                        try:
+                            respuesta_groq = await asyncio.wait_for(
+                                asyncio.to_thread(
+                                    cliente_groq.chat.completions.create,
+                                    model=modelo_groq,
+                                    messages=[
+                                        {"role": "system", "content": instrucciones_sistema},
+                                        {"role": "user", "content": texto_limpio}
+                                    ],
+                                    temperature=0.75,
+                                    max_tokens=1024
+                                ),
+                                timeout=10.0
+                            )
+                            texto_respuesta = respuesta_groq.choices[0].message.content
+                            break
+                        except Exception as err_groq:
+                            error_groq_detalle = f"{type(err_groq).__name__}: {err_groq}"
+                            print(f"Groq ({modelo_groq}) falló: {error_groq_detalle}", flush=True)
 
                 # 3. Si Groq fallara por algún motivo, usamos Gemini como respaldo
                 if not texto_respuesta and cliente_gemini:
@@ -190,10 +194,12 @@ async def on_message(message):
                 )
 
             except Exception as e:
-                print(f"Error en IA por mención: {e}", flush=True)
-                await message.reply(f"❌ Fallo técnico: `{str(e)[:200]}`")
+                detalle = f"{type(e).__name__}: {e} | Groq: {error_groq_detalle}"
+                print(f"Error en IA por mención: {detalle}", flush=True)
+                await message.reply(f"❌ Fallo técnico: `{detalle[:250]}`")
 
     await bot.process_commands(message)
+
 
 
 
