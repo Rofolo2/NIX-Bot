@@ -91,20 +91,18 @@ async def on_message(message):
                 usuario_id = str(message.author.id)
                 nombre_usuario = message.author.display_name
 
-                # 1. Buscamos en Mem0 usando el nuevo formato con filters
+                # 1. Buscamos en Mem0 los recuerdos de este usuario (con límite de 5s)
                 try:
-                    resultados_memoria = await asyncio.to_thread(
-                        cliente_memoria.search,
-                        query=texto_limpio,
-                        filters={"user_id": usuario_id}
+                    resultados_memoria = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            cliente_memoria.search,
+                            query=texto_limpio,
+                            filters={"user_id": usuario_id}
+                        ),
+                        timeout=5.0
                     )
-                except TypeError:
-                    # Respaldo por si la versión instalada usa user_id directo
-                    resultados_memoria = await asyncio.to_thread(
-                        cliente_memoria.search,
-                        query=texto_limpio,
-                        user_id=usuario_id
-                    )
+                except Exception:
+                    resultados_memoria = []
 
                 lista_recuerdos = []
                 if isinstance(resultados_memoria, dict) and "results" in resultados_memoria:
@@ -125,35 +123,46 @@ async def on_message(message):
                     f"{contexto_recuerdos}\n\n"
                     f"Reglas importantes:\n"
                     f"- Responde como en una charla real de Discord, directo y sin sonar robótico.\n"
-                    f"- Mantén tus respuestas por debajo de los 1900 caracteres para que quepan en un solo mensaje normal de Discord."
+                    f"- Mantén tus respuestas por debajo de los 1900 caracteres."
                 )
 
-                                # 2. Generamos la respuesta con Gemini (con modelos de respaldo por si uno está saturado)
-                modelos_disponibles = ["gemini-3.8-flash", "gemini-3.8-flash-lite", "gemini-3.0-flash"]
+                # 2. Generamos la respuesta con Gemini (máximo 8s por modelo)
+                modelos_disponibles = ["gemini-3.8-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
                 respuesta_gemini = None
                 ultimo_error = None
 
                 for modelo_actual in modelos_disponibles:
                     try:
-                        respuesta_gemini = await asyncio.to_thread(
-                            cliente_gemini.models.generate_content,
-                            model=modelo_actual,
-                            contents=texto_limpio,
-                            config=types.GenerateContentConfig(
-                                system_instruction=instrucciones_sistema,
-                                temperature=0.75
-                            )
+                        respuesta_gemini = await asyncio.wait_for(
+                            asyncio.to_thread(
+                                cliente_gemini.models.generate_content,
+                                model=modelo_actual,
+                                contents=texto_limpio,
+                                config=types.GenerateContentConfig(
+                                    system_instruction=instrucciones_sistema,
+                                    temperature=0.75
+                                )
+                            ),
+                            timeout=8.0
                         )
-                        break  # Si respondió bien, salimos del bucle
+                        break
                     except Exception as err_modelo:
                         ultimo_error = err_modelo
                         continue
 
                 if not respuesta_gemini:
-                    raise ultimo_error
+                    raise ultimo_error if ultimo_error else Exception("Servidores de IA ocupados, intenta en unos segundos.")
 
+                # 3. Sacamos el texto de la respuesta (esta es la línea que faltaba)
+                texto_respuesta = respuesta_gemini.text or "Me quedé en blanco un segundo, dime otra vez."
 
-                # 3. Guardamos la conversación en Mem0 en segundo plano
+                if len(texto_respuesta) > 1950:
+                    texto_respuesta = texto_respuesta[:1950] + "..."
+
+                # 4. Respondemos en texto normal directo en el chat
+                await message.reply(texto_respuesta, mention_author=False)
+
+                # 5. Guardamos la conversación en Mem0 en segundo plano
                 conversacion = [
                     {"role": "user", "content": texto_limpio},
                     {"role": "assistant", "content": texto_respuesta}
@@ -171,6 +180,7 @@ async def on_message(message):
                 await message.reply(f"❌ Fallo técnico: `{str(e)[:200]}`")
 
     await bot.process_commands(message)
+
 
 # ==================== MANEJADOR DE COMANDOS DE BARRA (/) ====================
 
