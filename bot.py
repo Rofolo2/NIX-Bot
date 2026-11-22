@@ -128,23 +128,30 @@ async def on_message(message):
                     f"- Mantén tus respuestas por debajo de los 1900 caracteres para que quepan en un solo mensaje normal de Discord."
                 )
 
-                # 2. Generamos la respuesta con Gemini
-                respuesta_gemini = await asyncio.to_thread(
-                    cliente_gemini.models.generate_content,
-                    model="gemini-3.8-flash",
-                    contents=texto_limpio,
-                    config=types.GenerateContentConfig(
-                        system_instruction=instrucciones_sistema,
-                        temperature=0.75
-                    )
-                )
+                                # 2. Generamos la respuesta con Gemini (con modelos de respaldo por si uno está saturado)
+                modelos_disponibles = ["gemini-3.8-flash", "gemini-3.8-flash-lite", "gemini-3.0-flash"]
+                respuesta_gemini = None
+                ultimo_error = None
 
-                texto_respuesta = respuesta_gemini.text or "Me quedé en blanco un segundo, dime otra vez."
+                for modelo_actual in modelos_disponibles:
+                    try:
+                        respuesta_gemini = await asyncio.to_thread(
+                            cliente_gemini.models.generate_content,
+                            model=modelo_actual,
+                            contents=texto_limpio,
+                            config=types.GenerateContentConfig(
+                                system_instruction=instrucciones_sistema,
+                                temperature=0.75
+                            )
+                        )
+                        break  # Si respondió bien, salimos del bucle
+                    except Exception as err_modelo:
+                        ultimo_error = err_modelo
+                        continue
 
-                if len(texto_respuesta) > 1950:
-                    texto_respuesta = texto_respuesta[:1950] + "..."
+                if not respuesta_gemini:
+                    raise ultimo_error
 
-                await message.reply(texto_respuesta, mention_author=False)
 
                 # 3. Guardamos la conversación en Mem0 en segundo plano
                 conversacion = [
